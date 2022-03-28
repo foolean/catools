@@ -1,0 +1,207 @@
+#!/bin/bash
+#
+# Filename:     create_server_cert
+# Author:       Bennett Samowich <bsamowich@foolean.org>
+# Date:         2014-04-30
+#
+# Description:
+#   create_server_cert is part of the CATools suite.  The script itself
+#   handles the creation of server certificates.  The result will be a
+#   directory which contains the server's certificate, key, csr, GPG
+#   signature, and SHA512 hash.  The GPG signature and SHA512 hashing
+#   provides a method to validate the certificate bundle once it is
+#   delivered to its recipient.
+#
+# License:
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Puplic License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+
+# Determine the root of our own directory structure
+# Note: this assumes that this script lives in <root>/bin
+export CA_TOOLS=$(readlink -f $(dirname $0)/..);
+
+# Flags
+DEBUG=0;        # Debugging flag
+VERBOSE=0;      # Verbosity flag
+FORCE=0;        # Force recreation of existing files
+FQDN="";        # FQDN of the server the certificate is for
+KEYSIZE=4096;   # Key size of the certificate
+
+# debug - Helper function to print debugging output
+function debug {
+    if [ ${DEBUG} -ge 1 ]; then
+        echo "debug: $*"
+    fi
+}
+
+# error - Helper function to print an error message
+function error {
+    echo "error: $*"
+}
+
+# fatal - Helper function to print an error message and exit
+function fatal {
+    echo "fatal: $*"
+    exit 1
+}
+
+# notice - Helper function to print general output
+function notice {
+    echo "notice: $*"
+}
+
+# verbose - Helper function to print verbose output
+function verbose {
+    if [ ${VERBOSE} -ge 1 ]; then
+        echo "$*"
+    fi
+}
+
+# usage - Simple usage function
+function usage {
+    echo "usage: $0 [OPTIONS]"
+    echo "  -d          - Display debugging output"
+    echo "  -f          - Force the recreation of existing files"
+    echo "  -h          - Print this message"
+    echo "  -n [FQDN]   - FQDN for the certificate"
+    echo "  -s [STRING] - SubjectAltName for the certificate"
+    echo "  -v          - Display more verbose output"
+    exit 1
+}
+
+# Parse command-line options
+while getopts ":dfhn:s:v" opt; do
+    case $opt in
+        d)
+            DEBUG=1
+            ;;
+        f)
+            FORCE=1
+            ;;
+        h)
+            usage
+            ;;
+        n)
+            FQDN=$OPTARG
+            ;;
+        s)
+            SAN=$OPTARG
+            ;;
+        v)
+            VERBOSE=1
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# We must have a FQDN
+if [ "${FQDN}" == "" ]; then
+    echo "Error: must supply a FQDN"
+    usage
+fi
+
+# If we don't have a subjectAltName, then use the FQDN
+if [ "${SAN}" == "" ]; then
+    SAN="DNS:${FQDN}"
+fi
+
+# Create the directory where this system's certificates will be placed
+OUTDIR="${CA_TOOLS}/certs/${FQDN}"
+if [ ! -d "${OUTDIR}" ]; then
+    mkdir -p "${OUTDIR}"
+    chown root:root "${OUTDIR}"
+    chmod 0700 "${OUTDIR}"
+fi
+
+# Initialize the rest of our variables
+DEVICE_CA_CONF="${CA_TOOLS}/etc/device-ca.conf"
+DEVICE_CA_PASSWD="${CA_TOOLS}/CA/device/private/device.passwd"
+SERVER_CONF="${CA_TOOLS}/etc/server.conf"
+SERVER_KEY="${OUTDIR}/${FQDN}-server.key"
+SERVER_CERT="${OUTDIR}/${FQDN}-server.crt"
+SERVER_CSR="${OUTDIR}/${FQDN}-server.csr"
+SERVER_PEM="${OUTDIR}/${FQDN}-server.pem"
+
+# Display some debugging information
+debug "General Flags:"
+debug "DEBUG            = '${DEBUG}'"
+debug "VERBOSE          = '${VERBOSE}'"
+debug "FORCE            = '${FORCE}'"
+debug ""
+debug "Variables:"
+debug "OUTDIR           = '${OUTDIR}'"
+debug "SERVER_CONF      = '${SERVER_CONF}'"
+debug "DEVICE_CA_CONF   = '${DEVICE_CA_CONF}'"
+debug "DEVICE_CA_PASSWD = '${DEVICE_CA_PASSWD}'"
+debug "SERVER_KEY       = '${SERVER_KEY}'"
+debug "SERVER_CERT      = '${SERVER_CERT}'"
+debug "SERVER_PEM       = '${SERVER_CSR}'"
+debug "SERVER_CSR       = '${SERVER_CSR}'"
+debug "SAN              = '${SAN}'"
+debug "CN               = '${CN}'"
+
+# We need to export SAN and CN so openssl can see them
+export SAN="${SAN}"
+export CN="${FQDN}"
+
+# Create the certificate request
+if [ ! -f "${SERVER_CSR}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${SERVER_CSR}"
+    openssl req -new             \
+        -sha512                  \
+        -config "${SERVER_CONF}" \
+        -out    "${SERVER_CSR}"  \
+        -keyout "${SERVER_KEY}"
+fi
+
+# Sign the certificate
+if [ ! -f "${SERVER_CERT}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${SERVER_CERT}"
+    openssl ca                          \
+        -batch                          \
+        -config     "${DEVICE_CA_CONF}" \
+        -in         "${SERVER_CSR}"     \
+        -out        "${SERVER_CERT}"    \
+        -extensions "server_ext"        \
+        -passin     "file:${DEVICE_CA_PASSWD}"
+fi
+
+# Create the PEM copy of the certificate
+if [ ! -f "${SERVER_PEM}" ] || [ ${FOURCE} -eq 1 ]; then
+    verbose "Creating ${SERVER_PEM}"
+    debug "executing: openssl x509 -in \"${SERVER_CERT}\" -out \"${SERVER_PEM}\" -outform PEM"
+    openssl x509 -in "${SERVER_CERT}" -out "${SERVER_PEM}" -outform PEM
+fi
+
+# Gpg sign the files
+verbose "Signing ${SERVER_CSR}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${SERVER_CSR}"
+verbose "Signing ${SERVER_CERT}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${SERVER_CERT}"
+verbose "Signing ${SERVER_KEY}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${SERVER_KEY}"
+verbose "Signing ${SERVER_PEM}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${SERVER_PEM}"
+
+# SHA512 checksum the files
+verbose "Creating ${OUTDIR}/SHA512SUM"
+sha512sum "${OUTDIR}/"* > "${OUTDIR}/SHA512SUM"

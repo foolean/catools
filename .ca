@@ -1,0 +1,119 @@
+
+# Root of the CA directory tree
+if [ ! ${CA_TOOLS} ]; then
+    echo "Setting CA_TOOLS"
+    export CA_TOOLS=$(readlink -f $(dirname $0))
+fi
+
+# Add the CA bin directory to our path
+export PATH="${PATH}:${CA_TOOLS}/bin"
+
+# Load our configuration
+source "${CA_TOOLS}/etc/catools.conf"
+
+# Create the GPG key
+alias create_gpg='${CA_TOOLS}/bin/create_gpg_key -n "${CA_GPG_NAME}" -e "${CA_GPG_EMAIL}" -dv'
+
+# Aliases for creating the various certificate authorities
+alias create_root_ca='${CA_TOOLS}/bin/create_ca -dkev -n root -b "${CA_KEY_SIZE}" -l "${CA_PW_LEN}"'
+alias create_intermediate_ca='${CA_TOOLS}/bin/create_ca -dkev -n intermediate -p root -b "${CA_KEY_SIZE}" -l "${CA_PW_LEN}"'
+alias create_puppet_ca='${CA_TOOLS}/bin/create_ca -dkev -n puppet -p intermediate -b "${CA_KEY_SIZE}" -l "${CA_PW_LEN}"'
+alias create_device_ca='${CA_TOOLS}/bin/create_ca -dkev -n device -p intermediate -b "${CA_KEY_SIZE}" -l "${CA_PW_LEN}"'
+alias create_identity_ca='${CA_TOOLS}/bin/create_ca -dkev -n identity -p intermediate -b "${CA_KEY_SIZE}" -l "${CA_PW_LEN}"'
+
+# Alias to build the entire CA structure
+alias create_full_ca='create_gpg && create_root_ca && create_intermediate_ca && create_puppet_ca && create_device_ca && create_identity_ca'
+
+# Alias for mounting and unmounting the root CA
+alias mount_root='${CA_TOOLS}/bin/luksmount -k "${CA_TOOLS}/enc/root-ca.pw" "${CA_TOOLS}/enc/root-ca.enc" "${CA_TOOLS}/CA/root"'
+alias umount_root='${CA_TOOLS}/bin/luksumount "${CA_TOOLS}/CA/root"'
+
+# Alias for mounting and unmounting the intermediate CA
+alias mount_intermediate='${CA_TOOLS}/bin/luksmount -k "${CA_TOOLS}/enc/intermediate-ca.pw" "${CA_TOOLS}/enc/intermediate-ca.enc" "${CA_TOOLS}/CA/intermediate"'
+alias umount_intermediate='${CA_TOOLS}/bin/luksumount "${CA_TOOLS}/CA/intermediate"'
+
+# Alias for mounting and unmounting the puppet CA
+alias mount_puppet='${CA_TOOLS}/bin/luksmount -k "${CA_TOOLS}/enc/puppet-ca.pw" "${CA_TOOLS}/enc/puppet-ca.enc" "${CA_TOOLS}/CA/puppet"'
+alias umount_puppet='${CA_TOOLS}/bin/luksumount "${CA_TOOLS}/CA/puppet"'
+
+# Alias for mounting and unmounting the identity CA
+alias mount_identity='${CA_TOOLS}/bin/luksmount -k "${CA_TOOLS}/enc/identity-ca.pw" "${CA_TOOLS}/enc/identity-ca.enc" "${CA_TOOLS}/CA/identity"'
+alias umount_identity='${CA_TOOLS}/bin/luksumount "${CA_TOOLS}/CA/identity"'
+
+# Alias for mounting and unmounting the device CA
+alias mount_device='${CA_TOOLS}/bin/luksmount -k "${CA_TOOLS}/enc/device-ca.pw" "${CA_TOOLS}/enc/device-ca.enc" "${CA_TOOLS}/CA/device"'
+alias umount_device='${CA_TOOLS}/bin/luksumount "${CA_TOOLS}/CA/device"'
+
+# Alias for working with GPG within the CA
+alias gpg='gpg --homedir "${CA_TOOLS}/.gnupg"'
+
+# Helper function to destroy everything when testing multiple runs
+function destroy_ca {
+    echo "Destroying gpg keys"
+    rm -r "${CA_TOOLS}/.gnupg"
+    rm    "${CA_TOOLS}/"*_GPG_KEY
+
+    echo "Destroying root CA"
+    "${CA_TOOLS}/bin/luksumount" "${CA_TOOLS}/CA/root"
+    rm    "${CA_TOOLS}/certs/root-ca.der"
+    rm    "${CA_TOOLS}/certs/root-ca.der.asc"
+    rm    "${CA_TOOLS}/certs/root-ca.pem"
+    rm    "${CA_TOOLS}/certs/root-ca.pem.asc"
+    rm    "${CA_TOOLS}/crl/root.crl"
+    rm    "${CA_TOOLS}/enc/root-ca.enc"
+    rm    "${CA_TOOLS}/enc/root-ca.enc.pw"
+    rm -r "${CA_TOOLS}/CA/root"
+
+    echo "Destroying intermediate CA"
+    "${CA_TOOLS}/bin/luksumount" "${CA_TOOLS}/CA/intermediate"
+    rm    "${CA_TOOLS}/certs/intermediate-ca.der"
+    rm    "${CA_TOOLS}/certs/intermediate-ca.der.asc"
+    rm    "${CA_TOOLS}/certs/intermediate-ca-chain.pem"
+    rm    "${CA_TOOLS}/certs/intermediate-ca.pem"
+    rm    "${CA_TOOLS}/certs/intermediate-ca.pem.asc"
+    rm    "${CA_TOOLS}/crl/intermediate.crl"
+    rm    "${CA_TOOLS}/enc/intermediate-ca.enc"
+    rm    "${CA_TOOLS}/enc/intermediate-ca.enc.pw"
+    rm -r "${CA_TOOLS}/CA/intermediate"
+
+    echo "Destroying puppet CA"
+    "${CA_TOOLS}/bin/luksumount" "${CA_TOOLS}/CA/puppet"
+    rm    "${CA_TOOLS}/certs/puppet-ca.der"
+    rm    "${CA_TOOLS}/certs/puppet-ca.der.asc"
+    rm    "${CA_TOOLS}/certs/puppet-ca-chain.pem"
+    rm    "${CA_TOOLS}/certs/puppet-ca.pem"
+    rm    "${CA_TOOLS}/certs/puppet-ca.pem.asc"
+    rm    "${CA_TOOLS}/crl/puppet.crl"
+    rm    "${CA_TOOLS}/enc/puppet-ca.enc"
+    rm    "${CA_TOOLS}/enc/puppet-ca.enc.pw"
+    rm -r "${CA_TOOLS}/CA/puppet"
+
+    echo "Destroying identity CA"
+    "${CA_TOOLS}/bin/luksumount" "${CA_TOOLS}/CA/identity"
+    rm    "${CA_TOOLS}/certs/identity-ca.der"
+    rm    "${CA_TOOLS}/certs/identity-ca.der.asc"
+    rm    "${CA_TOOLS}/certs/identity-ca-chain.pem"
+    rm    "${CA_TOOLS}/certs/identity-ca.pem"
+    rm    "${CA_TOOLS}/certs/identity-ca.pem.asc"
+    rm    "${CA_TOOLS}/crl/identity.crl"
+    rm    "${CA_TOOLS}/enc/identity-ca.enc"
+    rm    "${CA_TOOLS}/enc/identity-ca.enc.pw"
+    rm -r "${CA_TOOLS}/CA/identity"
+
+    echo "Destroying device CA"
+    "${CA_TOOLS}/bin/luksumount" "${CA_TOOLS}/CA/device"
+    rm    "${CA_TOOLS}/certs/device-ca.der"
+    rm    "${CA_TOOLS}/certs/device-ca.der.asc"
+    rm    "${CA_TOOLS}/certs/device-ca-chain.pem"
+    rm    "${CA_TOOLS}/certs/device-ca.pem"
+    rm    "${CA_TOOLS}/certs/device-ca.pem.asc"
+    rm    "${CA_TOOLS}/crl/device.crl"
+    rm    "${CA_TOOLS}/enc/device-ca.enc"
+    rm    "${CA_TOOLS}/enc/device-ca.enc.pw"
+    rm -r "${CA_TOOLS}/CA/device"
+
+    echo "Destroying anything left behind"
+    rm -r "${CA_TOOLS}/enc/"*
+    rm -r "${CA_TOOLS}/crl/"*
+    rm -r "${CA_TOOLS}/certs/"*
+}

@@ -1,0 +1,38 @@
+# Root of the CA directory tree
+export CA_ROOT=$(readlink -f $(dirname $0))
+
+alias lukscreate='${CA_ROOT}/bin/lukscreate'
+alias luksumount='${CA_ROOT}/bin/luksumount'
+alias luksmount='${CA_ROOT}/bin/luksmount'
+
+# Function for mounting the entire CA
+function mount_ca {
+    # Mount the main CA
+    IS_MOUNTED=$(mount | grep -c "on ${CA_ROOT}/ca ")
+    if [ ${IS_MOUNTED} -eq 0 ]; then
+        "${CA_ROOT}/bin/luksmount" "${CA_ROOT}/enc/data.enc" "${CA_ROOT}/ca"
+    fi
+
+    if [ -f "${CA_ROOT}/ca/.ca" ]; then
+        source "${CA_ROOT}/ca/.ca"
+    fi
+}
+
+# Function for unmounting the entire CA
+function umount_ca {
+    # Unmount everything inside the CA that's mounted
+    for MOUNTPOINT in $(ls "${CA_ROOT}/ca"); do
+        IS_MOUNTED=$(mount | grep -c "on ${MOUNTPOINT} ")
+        if [ ${IS_MOUNTED} -ge 1 ]; then
+            "${CA_ROOT}/bin/luksumount" "${MOUNTPOINT}"
+        fi
+    done
+
+    # Umount the main CA
+    IS_MOUNTED=$(mount | grep -c "on ${CA_ROOT}/ca ")
+    if [ ${IS_MOUNTED} -ge 1 ]; then
+        "${CA_ROOT}/bin/luksumount" "${CA_ROOT}/ca"
+    fi
+
+    unset CA_ROOT
+}

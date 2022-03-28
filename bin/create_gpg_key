@@ -1,0 +1,259 @@
+#!/bin/bash
+#
+# Filename:     create_gpg_key
+# Author:       Bennett Samowich <bsamowich@foolean.org>
+# Date:         2014-04-30
+#
+# Description:
+#   create_gpg_key is part of the CATools suite.  The script itself
+#   handles the creation of the GPG key used by the CA to sign
+#   certificates.  The primary purpose of this is to provide a method
+#   to validate the certificate once it is delivered to its recipient.
+#
+# License:
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Puplic License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+
+# Determine the root of our own directory structure
+# Note: this assumes that this script lives in <root>/bin
+export CA_TOOLS=$(readlink -f $(dirname $0)/..);
+
+# Initialize some variables
+DEBUG=0;                 # Debugging flag
+VERBOSE=0;               # Verbosity flag
+FORCE=0;                 # Force recreation of existing files
+NAME="${CA_GPG_NAME}";   # Name for the GPG key
+EMAIL="${CA_GPG_EMAIL}"; # Email for the GPG key
+
+# debug - Helper function to print debugging output
+function debug {
+    if [ ${DEBUG} -ge 1 ]; then
+        echo "debug: $*"
+    fi
+}
+
+# error - Helper function to print an error message
+function error {
+    echo "error: $*"
+}
+
+# fatal - Helper function to print an error message and exit
+function fatal {
+    echo "fatal: $*"
+    exit 1
+}
+
+# notice - Helper function to print general output
+function notice {
+    echo "notice: $*"
+}
+
+# verbose - Helper function to print verbose output
+function verbose {
+    if [ ${VERBOSE} -ge 1 ]; then
+        echo "$*"
+    fi
+}
+
+# usage - display command-line help
+function usage {
+    echo "usage: $0 [OPTIONS]"
+    echo "  -d          - Display debugging output"
+    echo "  -e [EMAIL]  - Email address for the key (default: ${EMAIL})"
+    echo "  -f          - Force the recreation of existing files"
+    echo "  -h          - Print this message"
+    echo "  -n [NAME]   - Name of the key (default: ${NAME})"
+    echo "  -v          - Display more verbose output"
+    exit 1
+}
+
+# Parse the command-line options
+while getopts ":de:fhn:v" opt; do
+    case $opt in
+        d)
+            DEBUG=1
+            ;;
+        e)
+            EMAIL=$OPTARG
+            ;;
+        f)
+            FORCE=1
+            ;;
+        h)
+            usage
+            ;;
+        n)
+            NAME=$OPTARG
+            ;;
+        v)
+            VERBOSE=1
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Make sure that we have a name
+if [ "${NAME}" == "" ]; then
+    error "Must supply a name"
+    usage
+    exit 1
+fi
+
+# Make sure that we have an email address
+if [ "${EMAIL}" == "" ]; then
+    error "Must supply an email address"
+    usage
+    exit 1
+fi
+
+# Assemble the GPG home directory and password file
+GPG_HOME="${CA_TOOLS}/.gnupg"
+GPG_PASSWD="${GPG_HOME}/ca-gpg-key.pw"
+
+# Make sure the GPG home directory exists
+if [ ! -d "${GPG_HOME}" ]; then
+    debug "executing: mkdir -p \"${GPG_HOME}\""
+    mkdir -p "${GPG_HOME}"
+    debug "executing: chown root:root \"${GPG_HOME}\""
+    chown root:root "${GPG_HOME}"
+    debug "chmod 0700 \"${GPG_HOME}\""
+    chmod 0700 "${GPG_HOME}"
+fi
+
+# Create the gpg.conf file
+if [ ! -f "${GPG_HOME}/gpg.conf" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${GPG_HOME}/gpg.conf"
+    ( cat -<< EOF
+fixed-list-mode
+keyid-format 0xlong
+with-fingerprint
+personal-digest-preferences SHA512 SHA384 SHA256 SHA224
+default-preference-list SHA512 SHA384 SHA256 SHA224 AES256 AES192 AES CAST5 BZIP2 ZLIB ZIP Uncompressed
+verify-options show-uid-validity
+list-options show-uid-validity
+cert-digest-algo SHA512
+EOF
+) > "${GPG_HOME}/gpg.conf"
+fi
+
+# Create the DETAILS file
+if [ ! -f "${GPG_HOME}/DETAILS" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${GPG_HOME}/DETAILS"
+    ( cat -<< EOF
+%echo Generating GPG key
+Key-Type: RSA
+Key-Length: 4096
+Key-Usage: sign,encrypt
+Name-Real: ${NAME}
+Name-Email: ${EMAIL}
+Expire-Date: 0
+%commit
+%echo done
+EOF
+) > "${GPG_HOME}/DETAILS"
+fi
+
+# Determine if we already have a key
+KEY_EXISTS=$(gpg --homedir "${GPG_HOME}" --list-keys | grep -c "${NAME} <${EMAIL}>")
+
+# Display some debugging information
+debug "General Flags:"
+debug "DEBUG              = '${DEBUG}'"
+debug "VERBOSE            = '${VERBOSE}'"
+debug "FORCE              = '${FORCE}'"
+debug ""
+debug "Variables:"
+debug "NAME               = '${NAME}"
+debug "EMAIL              = '${EMAIL}"
+debug "GPG_HOME           = '${GPG_HOME}'"
+debug "GPG_PASSWD         = '${GPG_PASSWD}'"
+debug "KEY_EXISTS         = '${KEY_EXISTS}'"
+
+# Remove any existing key if FORCE is set
+if [ ${KEY_EXISTS} -ge 1 ] && [ ${FORCE} -eq 1 ]; then
+    gpg --homedir "${GPG_HOME}" --fingerprint "${NAME} <${EMAIL}>" | \
+        grep fingerprint | cut -f2 -d= | sed -e 's/ //g' | while read FINGERPRINT
+        do
+            verbose "Deleting key '${FINGERPRINT}'"
+            debug "executing: gpg --homedir \"${GPG_HOME}\" --batch --yes --delete-secret-key \"${FINGERPRINT}\""
+            gpg --homedir "${GPG_HOME}" --batch --yes --delete-secret-key "${FINGERPRINT}"
+            debug "executing: gpg --homedir \"${GPG_HOME}\" --batch --yes --delete-key \"${FINGERPRINT}\""
+            gpg --homedir "${GPG_HOME}" --batch --yes --delete-key "${FINGERPRINT}"
+            debug "executing: rm \"${GPG_HOME}/${FINGERPRINT}-revoke.asc\""
+            rm "${GPG_HOME}/${FINGERPRINT}-revoke.asc"
+            debug "executing: rm \"${GPG_HOME}/${FINGERPRINT}-public.asc\""
+            rm "${GPG_HOME}/${FINGERPRINT}-public.asc"
+            debug "executing: rm \"${GPG_HOME}/${FINGERPRINT}-private.asc\""
+            rm "${GPG_HOME}/${FINGERPRINT}-private.asc"
+        done
+    KEY_EXISTS=0
+fi
+
+# Create the GPG key's passphrase
+if [ ! -f "${GPG_PASSWD}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating passphrase"
+    debug "executing: \"${CA_TOOLS}/bin/genpasswd\" -l 4096 -r 1024 > \"${GPG_PASSWD}\""
+    "${CA_TOOLS}/bin/genpasswd" -l 4096 -r 1024 > "${GPG_PASSWD}"
+fi
+
+# Generate the key
+if [ ${KEY_EXISTS} -eq 0 ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating GPG key"
+    debug "executing: cat \"${GPG_PASSWD}\" | gpg --yes --batch --passphrase-fd 0 --homedir \"${GPG_HOME}\" --gen-key \"${GPG_HOME}/DETAILS\""
+    cat "${GPG_PASSWD}" | \
+        gpg --yes --batch --passphrase-fd 0 --homedir "${GPG_HOME}" --gen-key "${GPG_HOME}/DETAILS"
+    FORCE=1
+fi
+
+# Generate the revocation certificate
+gpg --homedir "${GPG_HOME}" --fingerprint "${NAME} <${EMAIL}>" | \
+    grep fingerprint | cut -f2 -d= | sed -e 's/ //g' | while read FINGERPRINT
+    do
+        GPG_REVOKE="${GPG_HOME}/${FINGERPRINT}-revoke.asc"
+        if [ ! -f "${GPG_REVOKE}" ] || [ ${FORCE} -eq 1 ]; then
+            verbose "Generating ${GPG_REVOKE} for ${FINGERPRINT}"
+            debug "executing: gpg --homedir \"${GPG_HOME}\" --yes --output \"${GPG_REVOKE}\" --gen-revoke \"${FINGERPRINT}\""
+            gpg --homedir "${GPG_HOME}" --yes --output "${GPG_REVOKE}" --gen-revoke "${FINGERPRINT}"
+        fi
+
+        # Export the public key
+        GPG_PUBLIC="${GPG_HOME}/${FINGERPRINT}-public.asc"
+        if [ ! -f "${GPG_PUBLIC}" ] || [ ${FORCE} -eq 1 ]; then
+            verbose "Exporting public key"
+            debug "executing: gpg --homedir \"${GPG_HOME}\" --armor --export \"${FINGERPRINT}\" > \"${GPG_PUBLIC}\""
+            gpg --homedir "${GPG_HOME}" --armor --export "${FINGERPRINT}" > "${GPG_PUBLIC}"
+        fi
+        PUBLIC_KEY="${CA_TOOLS}/$(echo ${NAME} | tr '[a-z]' '[A-Z]' | tr ' ' '_')_GPG_KEY"
+        if [ ! -f "${PUBLIC_KEY}" ] || [ ${FORCE} -eq 1 ]; then
+            verbose "Exporting public key"
+            debug "executing: gpg --homedir \"${GPG_HOME}\" --armor --export \"${FINGERPRINT}\" > \"${PUBLIC_KEY}\""
+            gpg --homedir "${GPG_HOME}" --armor --export "${FINGERPRINT}" > "${PUBLIC_KEY}"
+        fi
+
+        # Export the private key
+        GPG_PRIVATE="${GPG_HOME}/${FINGERPRINT}-private.asc"
+        if [ ! -f "${GPG_PRIVATE}" ] || [ ${FORCE} -eq 1 ]; then
+            verbose "Exporting public key"
+            debug "executing: gpg --homedir \"${GPG_HOME}\" --armor --export-secret-keys \"${FINGERPRINT}\" > \"${GPG_PRIVATE}\""
+            gpg --homedir "${GPG_HOME}" --armor --export-secret-keys "${FINGERPRINT}" > "${GPG_PRIVATE}"
+        fi
+    done

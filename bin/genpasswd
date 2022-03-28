@@ -1,0 +1,86 @@
+#!/bin/bash
+#
+# Filename:     genpasswd
+# Author:       Bennett Samowich <bsamowich@foolean.org>
+# Date:         2014-04-30
+#
+# Description:
+#   genpasswd is part of the CATools suite and is an overly complex
+#   but humerous password generator.  It's primary function is to
+#   attempt to create large strong passwords for use in password
+#   files that will be used later to automate many CA related
+#   processes.
+#
+# License:
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Puplic License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+
+# The character set to use in the generated password
+CHARSET="A-Za-z0-9_+=,.?<>;:[]{}()*&~"
+
+# Default length of the generated password
+PWLEN=128
+
+# Default number of encryption to use for password generation
+ROUNDS=100
+
+# Simple usage function
+function usage {
+    echo "usage: $0 [OPTIONS]"
+    echo "  -h            - Print this message"
+    echo "  -l [LENGTH]   - Length of the password to generate"
+    echo "  -r [ROUNDS]   - Number of rounds for generating passwords"
+    exit 1
+}
+
+# Parse the command-line arguments
+while getopts ":hl:r:" opt; do
+    case $opt in
+        h)
+            usage
+            ;;
+        l)
+            PWLEN=${OPTARG}
+            ;;
+        r)
+            ROUNDS=${OPTARG}
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Generate an initial password
+PW=$(openssl rand $((PWLEN+1024)))
+
+# Generate $ROUNDS number of passwords using the previous password as the key
+# for the encryption to ensure the passwords are sufficiently randomized.
+while [ ${ROUNDS} -ge 1 ]; do
+    PW=$(openssl rand $((PWLEN+1024)) | openssl enc -aes256 -k "pass:${PW}" | tr -dc "${CHARSET}" | cut -c 9-$((PWLEN+1033)))
+    ROUNDS=$((ROUNDS - 1))
+done
+
+# Final password generation of the desired length.
+PW=$(openssl rand $((PWLEN+1024)) | openssl enc -aes256 -k "pass:${PW}" | tr -dc "${CHARSET}" | cut -c 14-$((PWLEN + 12)))
+
+# Output the generated password
+echo "${PW}"
+

@@ -1,0 +1,215 @@
+#!/bin/bash
+#
+# Filename:     create_client_cert
+# Author:       Bennett Samowich <bsamowich@foolean.org>
+# Date:         2014-04-30
+#
+# Description:
+#   create_client_cert is part of the CATools suite.  The script itself
+#   handles the creation of client certificates.  The result will be a
+#   directory which contains the client's certificate, key, csr, GPG
+#   signature, and SHA512 hash.  The GPG signature and SHA512 hashing
+#   provides a method to validate the certificate bundle once it is
+#   delivered to its recipient.
+#
+# License:
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Puplic License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+
+# Determine the root of our own directory structure
+# Note: this assumes that this script lives in <root>/bin
+export CA_TOOLS=$(readlink -f $(dirname $0)/..);
+
+# Initialize some variables
+DEBUG=0;        # Debugging flag
+VERBOSE=0;      # Verbosity flag
+FORCE=0;        # Force recreation of existing files
+CN="";          # commonName for the client
+KEYSIZE=4096;   # Key size of the certificate
+
+# debug - Helper function to print debugging output
+function debug {
+    if [ ${DEBUG} -ge 1 ]; then
+        echo "debug: $*"
+    fi
+}
+
+# error - Helper function to print an error message
+function error {
+    echo "error: $*"
+}
+
+# fatal - Helper function to print an error message and exit
+function fatal {
+    echo "fatal: $*"
+    exit 1
+}
+
+# notice - Helper function to print general output
+function notice {
+    echo "notice: $*"
+}
+
+# verbose - Helper function to print verbose output
+function verbose {
+    if [ ${VERBOSE} -ge 1 ]; then
+        echo "$*"
+    fi
+}
+
+# usage - Simple usage function
+function usage {
+    echo "usage: $0 [OPTIONS]"
+    echo "  -d          - Display debugging output"
+    echo "  -f          - Force the recreation of existing files"
+    echo "  -h          - Print this message"
+    echo "  -k [SIZE]   - Key size in bits (default: ${KEYSIZE})"
+    echo "  -n [NAME]   - Common Name for the certificate"
+    echo "  -s [STRING] - SubjectAltName for the certificate"
+    echo "  -v          - Display more verbose output"
+    exit 1
+}
+
+# Parse the command-line options
+while getopts ":dfhk:n:s:v" opt; do
+    case $opt in
+        d)
+            DEBUG=1
+            ;;
+        f)
+            FORCE=1
+            ;;
+        h)
+            usage
+            ;;
+        k)
+            KEYSIZE=$OPTARG
+            ;;
+        n)
+            CN=$OPTARG
+            ;;
+        s)
+            SAN=$OPTARG
+            ;;
+        v)
+            VERBOSE=1
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# We must have a CN
+if [ "${CN}" == "" ]; then
+    echo "Error: must supply a CN"
+    usage
+fi
+
+# If we don't have a subjectAltName, then use the FQDN
+if [ "${SAN}" == "" ]; then
+    SAN="DNS:${CN}"
+fi
+
+# Collapse to lowercase and convert spaces to dashes
+FILENAME=$(echo "${CN}" | tr 'A-Z' 'a-z' | sed -e 's/ /-/g')
+
+# Create the directory where this system's certificates will be placed
+OUTDIR="${CA_TOOLS}/certs/${FILENAME}"
+if [ ! -d "${OUTDIR}" ]; then
+    mkdir -p "${OUTDIR}"
+    chown root:root "${OUTDIR}"
+    chmod 0700 "${OUTDIR}"
+fi
+
+# Initialize the rest of our variables
+DEVICE_CA_CONF="${CA_TOOLS}/etc/device-ca.conf"
+DEVICE_CA_PASSWD="${CA_TOOLS}/CA/device/private/device.passwd"
+CLIENT_CONF="${CA_TOOLS}/etc/client.conf"
+CLIENT_KEY="${OUTDIR}/${FILENAME}-client.key"
+CLIENT_CERT="${OUTDIR}/${FILENAME}-client.crt"
+CLIENT_CSR="${OUTDIR}/${FILENAME}-client.csr"
+CLIENT_PEM="${OUTDIR}/${FILENAME}-client.pem"
+
+# Display some debugging information
+debug "General Flags:"
+debug "DEBUG            = '${DEBUG}'"
+debug "VERBOSE          = '${VERBOSE}'"
+debug "FORCE            = '${FORCE}'"
+debug ""
+debug "Variables:"
+debug "OUTDIR           = '${OUTDIR}'"
+debug "CLIENT_CONF      = '${CLIENT_CONF}'"
+debug "DEVICE_CA_CONF   = '${DEVICE_CA_CONF}'"
+debug "DEVICE_CA_PASSWD = '${DEVICE_CA_PASSWD}'"
+debug "CLIENT_KEY       = '${CLIENT_KEY}'"
+debug "CLIENT_CERT      = '${CLIENT_CERT}'"
+debug "CLIENT_PEM       = '${CLIENT_PEM}'"
+debug "CLIENT_CSR       = '${CLIENT_CSR}'"
+debug "SAN              = '${SAN}'"
+debug "CN               = '${CN}'"
+
+# We need to export SAN and CN so openssl can see them
+export SAN="${SAN}"
+export CN="${CN}"
+
+# Create the certificate request
+if [ ! -f "${CLIENT_CSR}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${CLIENT_CSR}"
+    openssl req -new             \
+        -config "${CLIENT_CONF}" \
+        -out    "${CLIENT_CSR}"  \
+        -keyout "${CLIENT_KEY}"
+fi
+
+# Sign the certificate
+if [ ! -f "${CLIENT_CERT}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${CLIENT_CERT}"
+    openssl ca                          \
+        -batch                          \
+        -config     "${DEVICE_CA_CONF}" \
+        -in         "${CLIENT_CSR}"     \
+        -out        "${CLIENT_CERT}"    \
+        -extensions "client_ext"        \
+        -passin     "file:${DEVICE_CA_PASSWD}"
+fi
+
+# Create the PEM copy of the certificate
+if [ ! -f "${CLIENT_PEM}" ] || [ ${FOURCE} -eq 1 ]; then
+    verbose "Creating ${CLIENT_PEM}"
+    debug "executing: openssl x509 -in \"${CLIENT_CERT}\" -out \"${CLIENT_PEM}\" -outform PEM"
+    openssl x509 -in "${CLIENT_CERT}" -out "${CLIENT_PEM}" -outform PEM
+fi
+
+# Gpg sign the files
+verbose "Signing ${CLIENT_CSR}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${CLIENT_CSR}"
+verbose "Signing ${CLIENT_CERT}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${CLIENT_CERT}"
+verbose "Signing ${CLIENT_KEY}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${CLIENT_KEY}"
+verbose "Signing ${CLIENT_PEM}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${CLIENT_PEM}"
+
+
+# SHA512 checksum the files
+verbose "Creating ${OUTDIR}/SHA512SUM"
+sha512sum "${OUTDIR}/"* > "${OUTDIR}/SHA512SUM"
+

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Determine the root of our own directory structure
+# Note: this assumes that this script lives in <root>/bin
+export CA_TOOLS=$(readlink -f $(dirname $0)/..);
+
+create_crl() {
+    CA_NAME="${1}"
+    CA_PATH="${CA_TOOLS}/CA/${CA_NAME}"
+    CA_CRL="${CA_TOOLS}/crl/${CA_NAME}.crl"
+    CA_CONF="${CA_TOOLS}/etc/${CA_NAME}.conf"
+    CA_PASSWD_FILE="${CA_PATH}/private/${CA_NAME}.passwd"
+
+    echo "Creating ${CA_CRL}"
+    echo "executing: openssl ca -gencrl -config \"${CA_CONF}\" -out \"${CA_CRL}\" -passin \"file:${CA_PASSWD_FILE}\""
+    openssl ca -gencrl       \
+        -config "${CA_CONF}" \
+        -out    "${CA_CRL}"  \
+        -passin "file:${CA_PASSWD_FILE}"
+}
+
+create_crl "device"
+create_crl "identity"

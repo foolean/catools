@@ -1,0 +1,217 @@
+#!/bin/bash
+#
+# Filename:     create_encryption_cert
+# Author:       Bennett Samowich <bsamowich@foolean.org>
+# Date:         2014-04-30
+#
+# Description:
+#   create_encryption_cert is part of the CATools suite.  The script itself
+#   handles the creation of encryption certificates.  The result will be a
+#   directory which contains the user's certificate, key, csr, GPG
+#   signature, and SHA512 hash.  The GPG signature and SHA512 hashing
+#   provides a method to validate the certificate bundle once it is
+#   delivered to its recipient.
+#
+# License:
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Puplic License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+
+# Determine the root of our own directory structure
+# Note: this assumes that this script lives in <root>/bin
+export CA_TOOLS=$(readlink -f $(dirname $0)/..);
+
+# Initialize some variables
+DEBUG=0;        # Debugging flag
+VERBOSE=0;      # Verbosity flag
+FORCE=0;        # Force recreation of existing files
+FULLNAME="";    # Full name for the identity
+EMAIL="";       # Email address of the identity
+KEYSIZE=4096;   # Key size of the certificate
+
+# debug - Helper function to print debugging output
+function debug {
+    if [ ${DEBUG} -ge 1 ]; then
+        echo "debug: $*"
+    fi
+}
+
+# error - Helper function to print an error message
+function error {
+    echo "error: $*"
+}
+
+# fatal - Helper function to print an error message and exit
+function fatal {
+    echo "fatal: $*"
+    exit 1
+}
+
+# notice - Helper function to print general output
+function notice {
+    echo "notice: $*"
+}
+
+# verbose - Helper function to print verbose output
+function verbose {
+    if [ ${VERBOSE} -ge 1 ]; then
+        echo "$*"
+    fi
+}
+
+# usage - Simple usage function
+function usage {
+    echo "usage: $0 [OPTIONS]"
+    echo "  -d          - Display debugging output"
+    echo "  -e [STRING] - Email address for the certificate"
+    echo "  -f          - Force the recreation of existing files"
+    echo "  -h          - Print this message"
+    echo "  -n [STRING] - Name for the certificate"
+    echo "  -v          - Display more verbose output"
+    exit 1
+}
+
+# Parse the command-line options
+while getopts ":de:fhn:v" opt; do
+    case $opt in
+        d)
+            DEBUG=1
+            ;;
+        e)
+            EMAIL=$OPTARG
+            ;;
+        f)
+            FORCE=1
+            ;;
+        h)
+            usage
+            ;;
+        n)
+            FULLNAME=$OPTARG
+            ;;
+        v)
+            VERBOSE=1
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# We must have a full name
+if [ "${FULLNAME}" == "" ]; then
+    error "must supply a name"
+    usage
+fi
+
+# We must have an email address
+if [ "${EMAIL}" == "" ]; then
+    error "must supply an email address"
+    usage
+fi
+
+# Create the directory where this system's certificates will be placed
+OUTDIR="${CA_TOOLS}/certs/${EMAIL}"
+if [ ! -d "${OUTDIR}" ]; then
+    mkdir -p "${OUTDIR}"
+    chown root:root "${OUTDIR}"
+    chmod 0700 "${OUTDIR}"
+fi
+
+# Initialize the rest of our variables
+ENCRYPTION_CA_CONF="${CA_TOOLS}/etc/identity-ca.conf"
+ENCRYPTION_CA_PASSWD="${CA_TOOLS}/CA/identity/private/identity.passwd"
+ENCRYPTION_CONF="${CA_TOOLS}/etc/encryption.conf"
+ENCRYPTION_KEY="${OUTDIR}/${EMAIL}-encryption.key"
+ENCRYPTION_CERT="${OUTDIR}/${EMAIL}-encryption.crt"
+ENCRYPTION_CSR="${OUTDIR}/${EMAIL}-encryption.csr"
+ENCRYPTION_PEM="${OUTDIR}/${EMAIL}-encryption.pem"
+
+# Display some debugging information
+debug "General Flags:"
+debug "DEBUG              = '${DEBUG}'"
+debug "VERBOSE            = '${VERBOSE}'"
+debug "FORCE              = '${FORCE}'"
+debug ""
+debug "Identity:"
+debug "EMAIL              = '${EMAIL}'"
+debug "FULLNAME           = '${FULLNAME}'"
+debug ""
+debug "Variables:"
+debug "ENCRYPTION_CA_CONF   = '${ENCRYPTION_CA_CONF}'"
+debug "ENCRYPTION_CA_PASSWD = '${ENCRYPTION_CA_PASSWD}'"
+debug "OUTDIR             = '${OUTDIR}'"
+debug "ENCRYPTION_CONF      = '${ENCRYPTION_CONF}'"
+debug "ENCRYPTION_PASSWD    = '${ENCRYPTION_PASSWD}'"
+debug "ENCRYPTION_KEY       = '${ENCRYPTION_KEY}'"
+debug "ENCRYPTION_CERT      = '${ENCRYPTION_CERT}'"
+debug "ENCRYPTION_CSR       = '${ENCRYPTION_CSR}'"
+debug "ENCRYPTION_PEM       = '${ENCRYPTION_PEM}'"
+
+# We need to export SAN and CN so openssl can see them
+export EMAIL
+export FULLNAME
+
+# Create the key file
+if [ ! -f "${ENCRYPTION_KEY}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${ENCRYPTION_KEY}"
+    openssl genrsa -aes256 -out "${ENCRYPTION_KEY}" ${KEYSIZE}
+fi
+
+# Create the certificate request
+if [ ! -f "${ENCRYPTION_CSR}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${ENCRYPTION_CSR}"
+    export EMAIL
+    export CN
+    openssl req -new               \
+        -config "${ENCRYPTION_CONF}" \
+        -out    "${ENCRYPTION_CSR}"  \
+        -key    "${ENCRYPTION_KEY}"
+fi
+
+# Sign the certificate
+if [ ! -f "${ENCRYPTION_CERT}" ] || [ ${FORCE} -eq 1 ]; then
+    verbose "Creating ${ENCRYPTION_CERT}"
+    openssl ca                            \
+        -batch                            \
+        -config     "${ENCRYPTION_CA_CONF}" \
+        -in         "${ENCRYPTION_CSR}"        \
+        -out        "${ENCRYPTION_CERT}"       \
+        -extensions "email_ext"           \
+        -passin     "file:${ENCRYPTION_CA_PASSWD}"
+fi
+
+# Create the PEM copy of the certificate
+if [ ! -f "${ENCRYPTION_PEM}" ] || [ ${FOURCE} -eq 1 ]; then
+    verbose "Creating ${ENCRYPTION_PEM}"
+    debug "executing: openssl x509 -in \"${ENCRYPTION_CERT}\" -out \"${ENCRYPTION_PEM}\" -outform PEM"
+    openssl x509 -in "${ENCRYPTION_CERT}" -out "${ENCRYPTION_PEM}" -outform PEM
+fi
+
+# Gpg sign the files
+verbose "Signing ${ENCRYPTION_CSR}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${ENCRYPTION_CSR}"
+verbose "Signing ${ENCRYPTION_CERT}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${ENCRYPTION_CERT}"
+verbose "Signing ${ENCRYPTION_KEY}"
+gpg --homedir "${CA_TOOLS}/.gnupg" --yes --armor --detach-sign "${ENCRYPTION_KEY}"
+
+# SHA512 checksum the files
+verbose "Creating ${OUTDIR}/SHA512SUM"
+sha512sum "${OUTDIR}/"* > "${OUTDIR}/SHA512SUM"

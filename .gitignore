@@ -1,0 +1,13 @@
+
+# Ignore the CA directories
+CA/
+.gnupg/
+certs/
+crl/
+enc/
+
+# Ignore our GPG keys
+*_GPG_KEY
+
+# Ignore the catools configuration file
+etc/catools.conf
