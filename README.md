@@ -7,13 +7,13 @@ best practices.
 
 ## Certificate Authorities
 
---+ root
-  |
-  +--+ intermediate
-     |
-     +--+ device
-     +--+ identity
-     +--+ puppet
+    +--+ root
+       |
+       +--+ intermediate
+          |
+          +--+ device
+          +--+ identity
+          +--+ puppet
 
 ### root
 
