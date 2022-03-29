@@ -130,7 +130,7 @@ also source the .ca file within.
 
 ### The quick way
 
-1. Configure <catools>/etc/ca.conf
+1. Configure <catools>/etc/catools.conf
 
 2. Load the catools environment
 
@@ -143,7 +143,7 @@ also source the .ca file within.
 
 ### The manual way
 
-1. Configure <catools>/etc/ca.conf
+1. Configure <catools>/etc/catools.conf
 
 2. Load the catools environment
 
